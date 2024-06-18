@@ -54,6 +54,9 @@ class GeocodeData {
   /// Name of column that contains Location state
   final String stateHeader;
 
+  /// Name of column that contains Location country
+  final String? countryHeader;
+
   /// Name of column that contains Location latitude
   final String latitudeHeader;
 
@@ -66,18 +69,25 @@ class GeocodeData {
   late KDTree _kdTree;
   var _featureNameHeaderSN = -1;
   var _stateHeaderSN = -1;
+  var _countryHeaderSN = -1;
   var _latitudeHeaderSN = -1;
   var _longitudeHeaderSN = -1;
   bool loaded = false;
 
   /// prefer using the [GeocodeData.linesStream] constructor to load the file on demand,
   /// preventing the use of a lot of memory
-  GeocodeData(this.inputString, this.featureNameHeader, this.stateHeader, this.latitudeHeader, this.longitudeHeader,
-      {this.numMarkers = 1,
-      this.fieldDelimiter = defaultFieldDelimiter,
-      this.textDelimiter = defaultTextDelimiter,
-      this.eol = defaultEol})
-      : inputLinesStream = null;
+  GeocodeData(
+    this.inputString,
+    this.featureNameHeader,
+    this.stateHeader,
+    this.latitudeHeader,
+    this.longitudeHeader, {
+    this.numMarkers = 1,
+    this.fieldDelimiter = defaultFieldDelimiter,
+    this.textDelimiter = defaultTextDelimiter,
+    this.eol = defaultEol,
+    this.countryHeader,
+  }) : inputLinesStream = null;
 
   /// prefer use this constructor to load the file on demand,
   /// this will prevent to use a lot of memory
@@ -91,6 +101,7 @@ class GeocodeData {
     this.fieldDelimiter = defaultFieldDelimiter,
     this.textDelimiter = defaultTextDelimiter,
     this.eol = defaultEol,
+    this.countryHeader,
   }) : inputString = null;
 
   Future<void> load() async {
@@ -142,8 +153,15 @@ class GeocodeData {
       _stateHeaderSN = row.indexWhere((x) => x == stateHeader);
       _latitudeHeaderSN = row.indexWhere((x) => x == latitudeHeader);
       _longitudeHeaderSN = row.indexWhere((x) => x == longitudeHeader);
+      if (countryHeader != null) {
+        _countryHeaderSN = row.indexWhere((x) => x == countryHeader);
+      }
 
-      if (_featureNameHeaderSN == -1 || _stateHeaderSN == -1 || _latitudeHeaderSN == -1 || _longitudeHeaderSN == -1) {
+      if (_featureNameHeaderSN == -1 ||
+          _stateHeaderSN == -1 ||
+          _latitudeHeaderSN == -1 ||
+          _longitudeHeaderSN == -1 ||
+          (countryHeader != null && _countryHeaderSN == -1)) {
         throw Exception('Some of header is not find in file');
       }
     } else {
@@ -212,8 +230,8 @@ class GeocodeData {
     var R = 3958.8; // Radius of the earth in miles
     var dLat = _deg2rad(latEnd - latStart); // deg2rad below
     var dLon = _deg2rad(lonEnd - lonStart);
-    var a =
-        sin(dLat / 2) * sin(dLat / 2) + cos(_deg2rad(latStart)) * cos(_deg2rad(latEnd)) * sin(dLon / 2) * sin(dLon / 2);
+    var a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_deg2rad(latStart)) * cos(_deg2rad(latEnd)) * sin(dLon / 2) * sin(dLon / 2);
     var c = 2 * atan2(sqrt(a), sqrt(1 - a));
     var d = R * c; // Distance in miles
     return d;
