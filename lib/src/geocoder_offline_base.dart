@@ -1,11 +1,14 @@
+// ignore_for_file: omit_local_variable_types
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:csv/csv.dart';
 import 'package:geocoder_offline/geocoder_offline.dart';
-import 'package:geocoder_offline/src/SearchData.dart';
+import 'package:geocoder_offline/src/search_data.dart';
 import 'package:kdtree/kdtree.dart';
-
-import 'LocationData.dart';
 
 class GeocodeData {
   /// List of possible bearings
@@ -33,7 +36,8 @@ class GeocodeData {
   final double DIRECTION_RANGE = 22.5;
 
   /// String that contains all possible Location
-  final String inputString;
+  final String? inputString;
+  final Stream<List<int>> Function()? inputLinesStream;
 
   /// Field Delimiter in inputString
   final String fieldDelimiter;
@@ -60,52 +64,99 @@ class GeocodeData {
   final int numMarkers;
 
   late KDTree _kdTree;
-  late int _featureNameHeaderSN;
-  late int _stateHeaderSN;
-  late int _latitudeHeaderSN;
-  late int _longitudeHeaderSN;
+  var _featureNameHeaderSN = -1;
+  var _stateHeaderSN = -1;
+  var _latitudeHeaderSN = -1;
+  var _longitudeHeaderSN = -1;
+  bool loaded = false;
 
-  GeocodeData(this.inputString, this.featureNameHeader, this.stateHeader,
-      this.latitudeHeader, this.longitudeHeader,
+  /// prefer using the [GeocodeData.linesStream] constructor to load the file on demand,
+  /// preventing the use of a lot of memory
+  GeocodeData(this.inputString, this.featureNameHeader, this.stateHeader, this.latitudeHeader, this.longitudeHeader,
       {this.numMarkers = 1,
       this.fieldDelimiter = defaultFieldDelimiter,
       this.textDelimiter = defaultTextDelimiter,
-      this.eol = defaultEol}) {
-    var rowsAsListOfValues = const CsvToListConverter().convert(inputString,
+      this.eol = defaultEol})
+      : inputLinesStream = null;
+
+  /// prefer use this constructor to load the file on demand,
+  /// this will prevent to use a lot of memory
+  GeocodeData.linesStream(
+    this.inputLinesStream,
+    this.featureNameHeader,
+    this.stateHeader,
+    this.latitudeHeader,
+    this.longitudeHeader, {
+    this.numMarkers = 1,
+    this.fieldDelimiter = defaultFieldDelimiter,
+    this.textDelimiter = defaultTextDelimiter,
+    this.eol = defaultEol,
+  }) : inputString = null;
+
+  Future<void> load() async {
+    _kdTree = await Isolate.run(() async {
+      final csvConverter = CsvToListConverter(
         fieldDelimiter: fieldDelimiter,
         textDelimiter: textDelimiter,
         eol: eol,
-        shouldParseNumbers: false);
+        shouldParseNumbers: false,
+      );
+      _kdTree = KDTree([], _distance, ['latitude', 'longitude']);
+      int loadedLine = 0;
 
-    _featureNameHeaderSN =
-        rowsAsListOfValues[0].indexWhere((x) => x == featureNameHeader);
-    _stateHeaderSN = rowsAsListOfValues[0].indexWhere((x) => x == stateHeader);
-    _latitudeHeaderSN =
-        rowsAsListOfValues[0].indexWhere((x) => x == latitudeHeader);
-    _longitudeHeaderSN =
-        rowsAsListOfValues[0].indexWhere((x) => x == longitudeHeader);
+      if (inputString != null) {
+        for (var line in inputString!.split(eol)) {
+          final convertedLine = csvConverter.convert(line);
+          if (convertedLine.isNotEmpty) {
+            loadRow(convertedLine[0], loadedLine);
+          }
+          loadedLine++;
+        }
+      } else if (inputLinesStream != null) {
+        final rowsOutput = StreamController<List>();
+        final inputSink = csvConverter.startChunkedConversion(rowsOutput.sink);
 
-    if (_featureNameHeaderSN == -1 ||
-        _stateHeaderSN == -1 ||
-        _latitudeHeaderSN == -1 ||
-        _longitudeHeaderSN == -1) {
-      throw Exception('Some of header is not find in file');
-    }
+        rowsOutput.stream.listen((row) {
+          loadRow(row, loadedLine);
+          loadedLine++;
+        });
 
-    var locations = rowsAsListOfValues
-        .sublist(1)
-        .map((model) => LocationData(
-            model[_featureNameHeaderSN],
-            model[_stateHeaderSN],
-            double.tryParse(model[_latitudeHeaderSN].toString()) ?? -1,
-            double.tryParse(model[_longitudeHeaderSN].toString()) ?? -1))
-        .map((model) => model.toJson())
-        .toList();
+        inputLinesStream!().listen((data) {
+          inputSink.add(utf8.decode(data));
+        }, onDone: () {
+          rowsOutput.close();
+        });
+        await rowsOutput.done;
+      }
 
-    _kdTree = KDTree(locations, _distance, ['latitude', 'longitude']);
+      print('Loaded $loadedLine locations');
+
+      return _kdTree;
+    });
+    loaded = true;
   }
 
-  static double _distance(location1, location2) {
+  void loadRow(List row, int index) {
+    if (index == 0) {
+      _featureNameHeaderSN = row.indexWhere((x) => x == featureNameHeader);
+      _stateHeaderSN = row.indexWhere((x) => x == stateHeader);
+      _latitudeHeaderSN = row.indexWhere((x) => x == latitudeHeader);
+      _longitudeHeaderSN = row.indexWhere((x) => x == longitudeHeader);
+
+      if (_featureNameHeaderSN == -1 || _stateHeaderSN == -1 || _latitudeHeaderSN == -1 || _longitudeHeaderSN == -1) {
+        throw Exception('Some of header is not find in file');
+      }
+    } else {
+      _kdTree.insert({
+        'featureName': row[_featureNameHeaderSN],
+        'state': row[_stateHeaderSN],
+        'latitude': double.tryParse(row[_latitudeHeaderSN].toString()) ?? -1,
+        'longitude': double.tryParse(row[_longitudeHeaderSN].toString()) ?? -1
+      });
+    }
+  }
+
+  double _distance(location1, location2) {
     var lat1 = location1['latitude'],
         lon1 = location1['longitude'],
         lat2 = location2['latitude'],
@@ -114,16 +165,15 @@ class GeocodeData {
     return calculateDistance(lat1, lon1, lat2, lon2);
   }
 
-  static double _deg2rad(deg) {
+  double _deg2rad(deg) {
     return deg * (pi / 180);
   }
 
-  static double _rad2deg(rad) {
+  double _rad2deg(rad) {
     return rad * (180 / pi);
   }
 
-  String? _calculateBearing(
-      double? lat1, double? lon1, double? lat2, double? lon2) {
+  String? _calculateBearing(double? lat1, double? lon1, double? lat2, double? lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
       return null;
     }
@@ -132,8 +182,7 @@ class GeocodeData {
     var latitude2 = _deg2rad(lat2);
     var longDiff = _deg2rad(lon2 - lon1);
     var y = sin(longDiff) * cos(latitude2);
-    var x = cos(latitude1) * sin(latitude2) -
-        sin(latitude1) * cos(latitude2) * cos(longDiff);
+    var x = cos(latitude1) * sin(latitude2) - sin(latitude1) * cos(latitude2) * cos(longDiff);
 
     var degrees = ((_rad2deg(atan2(y, x)) + 360) % 360) - 11.25;
 
@@ -143,6 +192,7 @@ class GeocodeData {
   }
 
   List<LocationResult> search(double latitute, double longitude) {
+    assert(loaded, 'call load() function before searching');
     var result = <LocationResult>[];
     var point = {'latitude': latitute, 'longitude': longitude};
     var nearest = _kdTree.nearest(point, numMarkers);
@@ -151,24 +201,19 @@ class GeocodeData {
     nearest.forEach((x) {
       var location = LocationData.fromJson(x[0]);
       double distance = x[1];
-      var bearing = _calculateBearing(
-          location.latitude, location.longitude, latitute, longitude);
+      var bearing = _calculateBearing(location.latitude, location.longitude, latitute, longitude);
       result.add(LocationResult(location, distance, bearing, searchData));
     });
 
     return result;
   }
 
-  static double calculateDistance(
-      double latStart, double lonStart, double latEnd, double lonEnd) {
+  double calculateDistance(double latStart, double lonStart, double latEnd, double lonEnd) {
     var R = 3958.8; // Radius of the earth in miles
     var dLat = _deg2rad(latEnd - latStart); // deg2rad below
     var dLon = _deg2rad(lonEnd - lonStart);
-    var a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_deg2rad(latStart)) *
-            cos(_deg2rad(latEnd)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
+    var a =
+        sin(dLat / 2) * sin(dLat / 2) + cos(_deg2rad(latStart)) * cos(_deg2rad(latEnd)) * sin(dLon / 2) * sin(dLon / 2);
     var c = 2 * atan2(sqrt(a), sqrt(1 - a));
     var d = R * c; // Distance in miles
     return d;

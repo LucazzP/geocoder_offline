@@ -1,4 +1,4 @@
-import './SearchData.dart';
+import 'search_data.dart';
 import '../geocoder_offline.dart';
 
 class LocationResult {
