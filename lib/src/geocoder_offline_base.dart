@@ -168,6 +168,7 @@ class GeocodeData {
       _kdTree.insert({
         'featureName': row[_featureNameHeaderSN],
         'state': row[_stateHeaderSN],
+        'country': countryHeader != null ? row[_countryHeaderSN] : null,
         'latitude': double.tryParse(row[_latitudeHeaderSN].toString()) ?? -1,
         'longitude': double.tryParse(row[_longitudeHeaderSN].toString()) ?? -1
       });
