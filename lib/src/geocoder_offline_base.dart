@@ -140,8 +140,6 @@ class GeocodeData {
         await rowsOutput.done;
       }
 
-      print('Loaded $loadedLine locations');
-
       return _kdTree;
     });
     loaded = true;
