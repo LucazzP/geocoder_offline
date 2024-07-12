@@ -66,7 +66,7 @@ class GeocodeData {
   /// Number of nearest result
   final int numMarkers;
 
-  final Future<R> Function<R>(FutureOr<R> Function() computation) isolateRun;
+  final Future<KDTree> Function<KDTree>(FutureOr<KDTree> Function() computation) isolateRun;
 
   late KDTree _kdTree;
   var _featureNameHeaderSN = -1;
