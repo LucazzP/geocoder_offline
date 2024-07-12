@@ -66,6 +66,8 @@ class GeocodeData {
   /// Number of nearest result
   final int numMarkers;
 
+  final Future<R> Function<R>(FutureOr<R> Function() computation) isolateRun;
+
   late KDTree _kdTree;
   var _featureNameHeaderSN = -1;
   var _stateHeaderSN = -1;
@@ -87,6 +89,7 @@ class GeocodeData {
     this.textDelimiter = defaultTextDelimiter,
     this.eol = defaultEol,
     this.countryHeader,
+    this.isolateRun = Isolate.run,
   }) : inputLinesStream = null;
 
   /// prefer use this constructor to load the file on demand,
@@ -102,10 +105,11 @@ class GeocodeData {
     this.textDelimiter = defaultTextDelimiter,
     this.eol = defaultEol,
     this.countryHeader,
+    this.isolateRun = Isolate.run,
   }) : inputString = null;
 
   Future<void> load() async {
-    _kdTree = await Isolate.run(() async {
+    _kdTree = await isolateRun(() async {
       final csvConverter = CsvToListConverter(
         fieldDelimiter: fieldDelimiter,
         textDelimiter: textDelimiter,
