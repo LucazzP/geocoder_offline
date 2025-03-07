@@ -123,7 +123,7 @@ class GeocodeData {
         for (var line in inputString!.split(eol)) {
           final convertedLine = csvConverter.convert(line);
           if (convertedLine.isNotEmpty) {
-            loadRow(convertedLine[0], loadedLine);
+            await loadRow(convertedLine[0], loadedLine);
           }
           loadedLine++;
         }
@@ -131,8 +131,10 @@ class GeocodeData {
         final rowsOutput = StreamController<List>();
         final inputSink = csvConverter.startChunkedConversion(rowsOutput.sink);
 
+        final futures = <Future>[];
+
         rowsOutput.stream.listen((row) {
-          loadRow(row, loadedLine);
+          futures.add(loadRow(row, loadedLine));
           loadedLine++;
         });
 
@@ -142,6 +144,7 @@ class GeocodeData {
           rowsOutput.close();
         });
         await rowsOutput.done;
+        await Future.wait(futures);
       }
 
       return _kdTree;
@@ -149,7 +152,7 @@ class GeocodeData {
     loaded = true;
   }
 
-  void loadRow(List row, int index) {
+  Future<void> loadRow(List row, int index) async {
     if (index == 0) {
       _featureNameHeaderSN = row.indexWhere((x) => x == featureNameHeader);
       _stateHeaderSN = row.indexWhere((x) => x == stateHeader);
@@ -167,6 +170,10 @@ class GeocodeData {
         throw Exception('Some of header is not find in file');
       }
     } else {
+      // each 1000 rows, wait for the event loop to process other events
+      if (index % 1000 == 0 && isolateRun != Isolate.run) {
+        await Future(() {});
+      }
       _kdTree.insert({
         'featureName': row[_featureNameHeaderSN],
         'state': row[_stateHeaderSN],
